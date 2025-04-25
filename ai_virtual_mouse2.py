@@ -24,20 +24,7 @@ cap = cv2.VideoCapture(0)
 # Initialize variables for tracking hand movement
 prev_x, prev_y = 0, 0
 curr_x, curr_y = 0, 0
-default_smoothening = 7  # Default smoothening factor
-current_smoothening = default_smoothening
-hand_speed = 0
-prev_hand_pos = (0, 0)
-prev_hand_time = time.time()
-
-# Mouse control modes
-MOUSE_MODE_NORMAL = 0
-MOUSE_MODE_PRECISE = 1
-MOUSE_MODE_FAST = 2
-current_mode = MOUSE_MODE_NORMAL
-mode_names = ["Normal", "Precise", "Fast"]
-mode_switch_time = 0
-mode_cooldown = 1.5  # Time in seconds to prevent accidental mode switches
+smoothening = 7  # Smoothening factor for cursor movement
 
 # Initialize variables for click and scroll detection
 pinch_start_time = 0
@@ -56,29 +43,15 @@ rect_start_y = 100
 rect_width = 400
 rect_height = 300
 
-# Precision mode settings
-precision_smoothening = 12  # Higher for more precise movement
-precision_scale = 0.5  # Scale factor for movement in precision mode
-
-# Fast mode settings
-fast_smoothening = 3  # Lower for faster response
-fast_scale = 1.5  # Scale factor for movement in fast mode
-
 def calculate_distance(point1, point2):
     """Calculate the Euclidean distance between two points"""
     return ((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)**0.5
 
-def map_coordinates(hand_x, hand_y, scale_factor=1.0):
-    """Map hand coordinates to screen coordinates with scaling"""
+def map_coordinates(hand_x, hand_y):
+    """Map hand coordinates to screen coordinates"""
     # Calculate relative position in rectangle
     x_ratio = (hand_x - rect_start_x) / rect_width
     y_ratio = (hand_y - rect_start_y) / rect_height
-    
-    # Apply scaling factor based on mode
-    if scale_factor != 1.0:
-        # Scale around the center
-        x_ratio = 0.5 + (x_ratio - 0.5) * scale_factor
-        y_ratio = 0.5 + (y_ratio - 0.5) * scale_factor
     
     # Map to screen coordinates
     screen_x = int(x_ratio * screen_width)
@@ -141,16 +114,8 @@ def get_finger_positions(hand_landmarks, image_shape):
     
     return positions
 
-def calculate_hand_speed(current_pos, prev_pos, time_elapsed):
-    """Calculate hand movement speed in pixels per second"""
-    if time_elapsed == 0:
-        return 0
-    distance = calculate_distance(current_pos, prev_pos)
-    return distance / time_elapsed
-
-print("Enhanced AI Virtual Mouse System Starting...")
+print("AI Virtual Mouse System Starting...")
 print("Press 'q' to quit")
-print("Hold up pinky finger to toggle between mouse modes")
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -181,14 +146,12 @@ while cap.isOpened():
         start_time = time.time()
     
     cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.putText(frame, f"Mode: {mode_names[current_mode]}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     
     # Draw instructions on the frame
-    cv2.putText(frame, "Index finger: Move cursor", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    cv2.putText(frame, "Thumb + Index: Left click", (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    cv2.putText(frame, "Thumb + Ring: Right click", (10, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    cv2.putText(frame, "Index + Middle: Scroll", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    cv2.putText(frame, "Pinky up: Toggle mouse mode", (10, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(frame, "Index finger: Move cursor", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(frame, "Thumb + Index: Left click", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(frame, "Thumb + Ring: Right click", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(frame, "Index + Middle: Scroll", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     
     # Process hand landmarks if detected
     if results.multi_hand_landmarks:
@@ -205,42 +168,14 @@ while cap.isOpened():
             # Get finger positions
             finger_positions = get_finger_positions(hand_landmarks, frame.shape)
             
-            # Handle mode switch with pinky finger
-            pinky_up = finger_positions['pinky_tip'][1] < finger_positions['index_knuckle'][1] - 50
-            current_time = time.time()
-            
-            # Toggle mode if pinky finger is up and cooldown time has passed
-            if pinky_up and (current_time - mode_switch_time > mode_cooldown):
-                current_mode = (current_mode + 1) % 3
-                mode_switch_time = current_time
-                print(f"Switched to {mode_names[current_mode]} mode")
-            
-            # Calculate hand speed
-            current_time = time.time()
-            time_elapsed = current_time - prev_hand_time
-            hand_speed = calculate_hand_speed(finger_positions['index_tip'], prev_hand_pos, time_elapsed)
-            prev_hand_pos = finger_positions['index_tip']
-            prev_hand_time = current_time
-            
-            # Adjust smoothening and scaling based on mode
-            if current_mode == MOUSE_MODE_NORMAL:
-                current_smoothening = default_smoothening
-                scale_factor = 1.0
-            elif current_mode == MOUSE_MODE_PRECISE:
-                current_smoothening = precision_smoothening
-                scale_factor = precision_scale
-            else:  # MOUSE_MODE_FAST
-                current_smoothening = fast_smoothening
-                scale_factor = fast_scale
-            
             # Check if index finger is inside the control rectangle
             if check_inside_rectangle(*finger_positions['index_tip']):
-                # Move cursor based on index finger position with appropriate scaling
-                mapped_x, mapped_y = map_coordinates(*finger_positions['index_tip'], scale_factor)
+                # Move cursor based on index finger position
+                mapped_x, mapped_y = map_coordinates(*finger_positions['index_tip'])
                 
                 # Apply smoothening to cursor movement
-                curr_x = prev_x + (mapped_x - prev_x) / current_smoothening
-                curr_y = prev_y + (mapped_y - prev_y) / current_smoothening
+                curr_x = prev_x + (mapped_x - prev_x) / smoothening
+                curr_y = prev_y + (mapped_y - prev_y) / smoothening
                 
                 # Move the cursor
                 pyautogui.moveTo(curr_x, curr_y)
@@ -284,15 +219,8 @@ while cap.isOpened():
                 else:
                     scroll_active = False
     
-    # Display mode information
-    mode_color = (0, 255, 0) if current_mode == MOUSE_MODE_NORMAL else \
-                 (255, 0, 0) if current_mode == MOUSE_MODE_PRECISE else \
-                 (0, 0, 255)  # Fast mode
-    cv2.putText(frame, f"Mode: {mode_names[current_mode]}", (screen_width - 200, 30), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
-    
     # Display the frame
-    cv2.imshow('Enhanced AI Virtual Mouse', frame)
+    cv2.imshow('AI Virtual Mouse', frame)
     
     # Break the loop if 'q' is pressed
     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -301,4 +229,4 @@ while cap.isOpened():
 # Clean up
 cap.release()
 cv2.destroyAllWindows()
-print("Enhanced AI Virtual Mouse System Terminated")
+print("AI Virtual Mouse System Terminated")
